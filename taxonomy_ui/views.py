@@ -87,6 +87,7 @@ def upload_and_process(request):
     output_filename = None
     all_columns = COLUMN_CHOICES
     error = None
+    saved_count = 0  # NEW: Track saved records
 
     # -----------------------
     # GET REQUEST
@@ -102,6 +103,7 @@ def upload_and_process(request):
                 "output_filename": output_filename,
                 "all_columns": all_columns,
                 "error": error,
+                "saved_count": saved_count,  # NEW
             },
         )
 
@@ -122,6 +124,7 @@ def upload_and_process(request):
                 "output_filename": output_filename,
                 "all_columns": all_columns,
                 "error": error,
+                "saved_count": saved_count,
             },
         )
 
@@ -155,6 +158,35 @@ def upload_and_process(request):
                 )
         # ----------------------------------------------------------------------
 
+        # NEW: SAVE TO DATABASE
+        # ----------------------------------------------------------------------
+        from django.utils import timezone
+        
+        for _, row in df.iterrows():
+            try:
+                # Map DataFrame columns to model fields
+                PartMaster.objects.create(
+                    part_number=str(row.get('part_number', '')),
+                    updated_at=row.get('updated_at') or timezone.now(),
+                    dimensions=str(row.get('dimensions', '')) if pd.notna(row.get('dimensions')) else None,
+                    description=str(row.get('description', '')) if pd.notna(row.get('description')) else None,
+                    cost=str(row.get('cost', '')) if pd.notna(row.get('cost')) else None,
+                    material=str(row.get('material', '')) if pd.notna(row.get('material')) else None,
+                    vendor_name=str(row.get('vendor_name', '')) if pd.notna(row.get('vendor_name')) else None,
+                    currency=str(row.get('currency', '')) if pd.notna(row.get('currency')) else None,
+                    category_raw=str(row.get('category_raw', '')) if pd.notna(row.get('category_raw')) else None,
+                    category_master=str(row.get('category_master', '')) if pd.notna(row.get('category_master')) else None,
+                    source_system=str(row.get('source_system', '')) if pd.notna(row.get('source_system')) else None,
+                    source_file=filename,  # Track which file this came from
+                )
+                saved_count += 1
+            except Exception as row_error:
+                print(f"Error saving row: {row_error}")
+                continue
+        
+        print(f"✅ Saved {saved_count} records to database")
+        # ----------------------------------------------------------------------
+
         if "sources" in df.columns:
             df["sources"] = df["sources"].astype(str).str.replace(",", ",\n")
 
@@ -164,6 +196,8 @@ def upload_and_process(request):
         error = str(e)
         df = None
         has_df = False
+        import traceback
+        print(f"❌ Error in upload_and_process: {traceback.format_exc()}")
 
     # Final render
     return render(
@@ -176,6 +210,7 @@ def upload_and_process(request):
             "output_filename": output_filename,
             "all_columns": all_columns,
             "error": error,
+            "saved_count": saved_count,  # NEW
         },
     )
 
