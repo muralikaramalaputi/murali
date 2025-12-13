@@ -44,15 +44,69 @@ def init_db():
     """
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute(
-        """
-        CREATE TABLE IF NOT EXISTS part_master (
-            id SERIAL PRIMARY KEY,
-            part_number TEXT UNIQUE,
-            updated_at TIMESTAMP DEFAULT NOW()
+    
+    # Check if table exists
+    cur.execute("""
+        SELECT EXISTS (
+            SELECT FROM information_schema.tables 
+            WHERE table_schema = 'public' 
+            AND table_name = 'part_master'
         );
-        """
-    )
+    """)
+    table_exists = cur.fetchone()[0]
+    
+    if not table_exists:
+        # Create table with UNIQUE constraint
+        cur.execute(
+            """
+            CREATE TABLE part_master (
+                id SERIAL PRIMARY KEY,
+                part_number TEXT UNIQUE NOT NULL,
+                updated_at TIMESTAMP DEFAULT NOW()
+            );
+            """
+        )
+        print("✅ Created part_master table with UNIQUE constraint", flush=True)
+    else:
+        # Table exists - check if UNIQUE constraint exists
+        cur.execute("""
+            SELECT constraint_name 
+            FROM information_schema.table_constraints 
+            WHERE table_name = 'part_master' 
+            AND constraint_type = 'UNIQUE' 
+            AND constraint_name LIKE '%part_number%';
+        """)
+        unique_exists = cur.fetchone()
+        
+        if not unique_exists:
+            # Add UNIQUE constraint to existing table
+            print("⚠️  Adding UNIQUE constraint to existing part_number column...", flush=True)
+            try:
+                # First, remove any duplicate part_numbers
+                cur.execute("""
+                    DELETE FROM part_master
+                    WHERE id NOT IN (
+                        SELECT MIN(id)
+                        FROM part_master
+                        GROUP BY part_number
+                    );
+                """)
+                duplicates_removed = cur.rowcount
+                if duplicates_removed > 0:
+                    print(f"   Removed {duplicates_removed} duplicate part_numbers", flush=True)
+                
+                # Now add the UNIQUE constraint
+                cur.execute("""
+                    ALTER TABLE part_master 
+                    ADD CONSTRAINT part_master_part_number_key 
+                    UNIQUE (part_number);
+                """)
+                print("✅ Added UNIQUE constraint to part_number", flush=True)
+            except Exception as e:
+                print(f"⚠️  Could not add UNIQUE constraint: {e}", flush=True)
+                # If constraint already exists, that's fine
+                pass
+    
     conn.commit()
     cur.close()
     conn.close()
