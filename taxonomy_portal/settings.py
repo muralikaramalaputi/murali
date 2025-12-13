@@ -91,18 +91,23 @@ if DATABASE_URL:
             "NAME": url.path[1:],
             "USER": url.username,
             "PASSWORD": url.password,
-            "HOST": url.hostname,
-            "PORT": url.port,
+            "HOST": url.hostname,   # ✅ NOT None
+            "PORT": url.port,       # ✅ 5432
         }
     }
 else:
-    # local fallback
     DATABASES = {
         "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "taxonomy_poc",
+        "USER": "postgres",
+        "PASSWORD": "postgres",  # <-- your password
+        "HOST": "localhost",
+        "PORT": "5433",
         }
     }
+        
+
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
