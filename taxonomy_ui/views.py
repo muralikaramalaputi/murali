@@ -5,14 +5,19 @@ import io
 import sys
 import subprocess
 from collections import defaultdict
+import logging
 
 import pandas as pd
 from django.conf import settings
 from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
+from django.utils import timezone
 
 from .models import PartMaster
 from taxonomy_ui.stage2_adapter import run_stage2_from_django
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 # Path to background_stage1.py
 STAGE1_SCRIPT = os.path.join(settings.BASE_DIR, "background_stage1.py")
@@ -87,7 +92,8 @@ def upload_and_process(request):
     output_filename = None
     all_columns = COLUMN_CHOICES
     error = None
-    saved_count = 0  # NEW: Track saved records
+    saved_count = 0
+    warning = None
 
     # -----------------------
     # GET REQUEST
@@ -103,17 +109,26 @@ def upload_and_process(request):
                 "output_filename": output_filename,
                 "all_columns": all_columns,
                 "error": error,
-                "saved_count": saved_count,  # NEW
+                "saved_count": saved_count,
+                "warning": warning,
             },
         )
 
     # -----------------------
     # POST REQUEST
     # -----------------------
+    print("=" * 80)
+    print("🚀 UPLOAD STARTED")
+    print("=" * 80)
+    
     uploaded_files = request.FILES.getlist("files")
+    print(f"📁 Files received: {len(uploaded_files)}")
+    for f in uploaded_files:
+        print(f"   - {f.name} ({f.size} bytes)")
 
     if not uploaded_files:
         error = "No files were submitted!"
+        print("❌ ERROR: No files submitted")
         return render(
             request,
             "taxonomy_ui/upload.html",
@@ -125,12 +140,15 @@ def upload_and_process(request):
                 "all_columns": all_columns,
                 "error": error,
                 "saved_count": saved_count,
+                "warning": warning,
             },
         )
 
     try:
         # Run Stage 2
+        print("🔄 Running Stage 2 processing...")
         output_bytes, filename = run_stage2_from_django(uploaded_files)
+        print(f"✅ Stage 2 completed: {filename} ({len(output_bytes)} bytes)")
 
         # Save file
         output_dir = os.path.join(settings.MEDIA_ROOT, "output")
@@ -139,12 +157,16 @@ def upload_and_process(request):
 
         with open(output_path, "wb") as f:
             f.write(output_bytes)
+        print(f"💾 Saved output file: {output_path}")
 
         download_link = f"/download-full/{filename}/"
         output_filename = filename
 
         # Load preview DataFrame
+        print("📊 Loading Excel data...")
         df = pd.read_excel(io.BytesIO(output_bytes))
+        print(f"✅ Loaded DataFrame: {len(df)} rows, {len(df.columns)} columns")
+        print(f"   Columns: {list(df.columns)}")
 
         # ----------------------------------------------------------------------
         # FIX BLOCK: Prevent NaTType utcoffset crash in Django templates
@@ -160,44 +182,72 @@ def upload_and_process(request):
 
         # NEW: SAVE TO DATABASE
         # ----------------------------------------------------------------------
-        from django.utils import timezone
+        print("💾 Saving to database...")
         
-        for _, row in df.iterrows():
-            try:
-                # Map DataFrame columns to model fields
-                PartMaster.objects.create(
-                    part_number=str(row.get('part_number', '')),
-                    updated_at=row.get('updated_at') or timezone.now(),
-                    dimensions=str(row.get('dimensions', '')) if pd.notna(row.get('dimensions')) else None,
-                    description=str(row.get('description', '')) if pd.notna(row.get('description')) else None,
-                    cost=str(row.get('cost', '')) if pd.notna(row.get('cost')) else None,
-                    material=str(row.get('material', '')) if pd.notna(row.get('material')) else None,
-                    vendor_name=str(row.get('vendor_name', '')) if pd.notna(row.get('vendor_name')) else None,
-                    currency=str(row.get('currency', '')) if pd.notna(row.get('currency')) else None,
-                    category_raw=str(row.get('category_raw', '')) if pd.notna(row.get('category_raw')) else None,
-                    category_master=str(row.get('category_master', '')) if pd.notna(row.get('category_master')) else None,
-                    source_system=str(row.get('source_system', '')) if pd.notna(row.get('source_system')) else None,
-                    source_file=filename,  # Track which file this came from
-                )
-                saved_count += 1
-            except Exception as row_error:
-                print(f"Error saving row: {row_error}")
-                continue
+        # Check if required columns exist
+        required_cols = ['part_number']
+        missing_cols = [col for col in required_cols if col not in df.columns]
         
-        print(f"✅ Saved {saved_count} records to database")
+        if missing_cols:
+            warning = f"Cannot save to database: Missing required columns: {missing_cols}"
+            print(f"⚠️  {warning}")
+        else:
+            for idx, row in df.iterrows():
+                try:
+                    # Get part_number (required)
+                    part_num = str(row.get('part_number', f'UNKNOWN_{idx}'))
+                    
+                    # Get updated_at or use current time
+                    updated_at = row.get('updated_at')
+                    if pd.isna(updated_at) or updated_at is None:
+                        updated_at = timezone.now()
+                    
+                    # Create the record
+                    PartMaster.objects.create(
+                        part_number=part_num,
+                        updated_at=updated_at,
+                        dimensions=str(row.get('dimensions', ''))[:255] if pd.notna(row.get('dimensions')) else None,
+                        description=str(row.get('description', '')) if pd.notna(row.get('description')) else None,
+                        cost=str(row.get('cost', ''))[:100] if pd.notna(row.get('cost')) else None,
+                        material=str(row.get('material', ''))[:255] if pd.notna(row.get('material')) else None,
+                        vendor_name=str(row.get('vendor_name', ''))[:255] if pd.notna(row.get('vendor_name')) else None,
+                        currency=str(row.get('currency', ''))[:50] if pd.notna(row.get('currency')) else None,
+                        category_raw=str(row.get('category_raw', ''))[:255] if pd.notna(row.get('category_raw')) else None,
+                        category_master=str(row.get('category_master', ''))[:255] if pd.notna(row.get('category_master')) else None,
+                        source_system=str(row.get('source_system', ''))[:50] if pd.notna(row.get('source_system')) else None,
+                        source_file=filename[:255],
+                    )
+                    saved_count += 1
+                    
+                    if saved_count % 10 == 0:
+                        print(f"   Saved {saved_count} records...")
+                        
+                except Exception as row_error:
+                    print(f"❌ Error saving row {idx}: {row_error}")
+                    continue
+            
+            print(f"✅ Successfully saved {saved_count} records to database")
         # ----------------------------------------------------------------------
 
         if "sources" in df.columns:
             df["sources"] = df["sources"].astype(str).str.replace(",", ",\n")
 
         has_df = not df.empty
+        print(f"✅ Upload process completed successfully")
 
     except Exception as e:
         error = str(e)
         df = None
         has_df = False
         import traceback
-        print(f"❌ Error in upload_and_process: {traceback.format_exc()}")
+        error_trace = traceback.format_exc()
+        print(f"❌ ERROR in upload_and_process:")
+        print(error_trace)
+        logger.error(f"Upload error: {error_trace}")
+
+    print("=" * 80)
+    print(f"📊 FINAL STATUS: saved_count={saved_count}, has_df={has_df}, error={error}")
+    print("=" * 80)
 
     # Final render
     return render(
@@ -210,7 +260,8 @@ def upload_and_process(request):
             "output_filename": output_filename,
             "all_columns": all_columns,
             "error": error,
-            "saved_count": saved_count,  # NEW
+            "saved_count": saved_count,
+            "warning": warning,
         },
     )
 
