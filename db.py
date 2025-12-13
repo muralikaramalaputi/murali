@@ -1,16 +1,39 @@
 # db.py
 
+import os
 import math
 from typing import Dict, Any, Iterable, List, Sequence
+from urllib.parse import urlparse
 
 import psycopg2
 from psycopg2.extras import execute_values
 
-from config import DB_CONFIG
-
 
 def get_connection():
-    return psycopg2.connect(**DB_CONFIG)
+    """
+    Get database connection from DATABASE_URL environment variable (Render).
+    Falls back to config.DB_CONFIG for local development.
+    """
+    database_url = os.environ.get('DATABASE_URL')
+    
+    if database_url:
+        # Parse DATABASE_URL for Render/production
+        parsed = urlparse(database_url)
+        return psycopg2.connect(
+            host=parsed.hostname,
+            port=parsed.port or 5432,
+            database=parsed.path[1:],  # Remove leading '/'
+            user=parsed.username,
+            password=parsed.password,
+            sslmode='require'  # Render requires SSL
+        )
+    else:
+        # Fall back to local config for development
+        try:
+            from config import DB_CONFIG
+            return psycopg2.connect(**DB_CONFIG)
+        except ImportError:
+            raise Exception("DATABASE_URL not set and config.DB_CONFIG not available")
 
 
 def init_db():

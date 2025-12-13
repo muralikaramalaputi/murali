@@ -13,7 +13,7 @@ from config import SOURCES_DIRS, OUTPUT_DIR
 from ingestion_utils import load_file
 from cleansing import cleanup_pipeline
 from enrichment_text import enrich_from_description
-#from merge_logic import merge_records_for_part
+from merge_logic import merge_records_by_part_number
 from db import init_db, upsert_part_master
 
 
@@ -42,46 +42,59 @@ def clean_pipeline(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-from merge_logic import merge_records_by_part_number
-
 def run_stage1():
     print("🚀 Stage 1: Background Ingestion Started\n")
 
-    init_db()
+    try:
+        init_db()
+        print("✅ Database initialized")
 
-    df_raw = load_all_sources()
-    print(f"📊 Raw rows loaded: {len(df_raw)}")
+        df_raw = load_all_sources()
+        print(f"📊 Raw rows loaded: {len(df_raw)}")
 
-    df_clean = clean_pipeline(df_raw)
+        if df_raw.empty:
+            print("⚠️  No data loaded from sources")
+            return
 
-    # Convert to records
-    records = df_clean.to_dict(orient="records")
+        df_clean = clean_pipeline(df_raw)
 
-    # Group by part number
-    grouped = {}
-    for r in records:
-        pn = r.get("part_number")
-        if not pn:
-            continue
-        grouped.setdefault(pn, []).append(r)
+        # Convert to records
+        records = df_clean.to_dict(orient="records")
 
-    # Merge rows for each part
-    merged_records = []
-    for pn, rows in grouped.items():
-        merged = merge_records_by_part_number(rows)
-        merged_records.append(merged)
+        # Group by part number
+        grouped = {}
+        for r in records:
+            pn = r.get("part_number")
+            if not pn:
+                continue
+            grouped.setdefault(pn, []).append(r)
 
-    print(f"📊 Unique merged part_numbers: {len(merged_records)}")
+        # Merge rows for each part
+        merged_records = []
+        for pn, rows in grouped.items():
+            merged = merge_records_by_part_number(rows)
+            merged_records.append(merged)
 
-    # Upsert
-    upsert_part_master(merged_records)
+        print(f"📊 Unique merged part_numbers: {len(merged_records)}")
 
+        # Upsert
+        if merged_records:
+            upsert_part_master(merged_records)
+            print(f"✅ Upserted {len(merged_records)} records to database")
+        else:
+            print("⚠️  No records to upsert")
 
-    # Save snapshot for inspection
-    snapshot_path = os.path.join(OUTPUT_DIR, "stage1_master_snapshot.xlsx")
-    pd.DataFrame(merged_records).to_excel(snapshot_path, index=False)
-    print(f"📂 Snapshot saved to: {snapshot_path}")
-    print("✅ Stage 1 complete.")
+        # Save snapshot for inspection
+        snapshot_path = os.path.join(OUTPUT_DIR, "stage1_master_snapshot.xlsx")
+        pd.DataFrame(merged_records).to_excel(snapshot_path, index=False)
+        print(f"📂 Snapshot saved to: {snapshot_path}")
+        print("✅ Stage 1 complete.")
+
+    except Exception as e:
+        print(f"❌ Stage 1 failed: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 if __name__ == "__main__":
