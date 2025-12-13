@@ -117,18 +117,18 @@ def upload_and_process(request):
     # -----------------------
     # POST REQUEST
     # -----------------------
-    print("=" * 80)
-    print("🚀 UPLOAD STARTED")
-    print("=" * 80)
+    print("=" * 80, flush=True)
+    print("🚀 UPLOAD STARTED", flush=True)
+    print("=" * 80, flush=True)
     
     uploaded_files = request.FILES.getlist("files")
-    print(f"📁 Files received: {len(uploaded_files)}")
+    print(f"📁 Files received: {len(uploaded_files)}", flush=True)
     for f in uploaded_files:
-        print(f"   - {f.name} ({f.size} bytes)")
+        print(f"   - {f.name} ({f.size} bytes)", flush=True)
 
     if not uploaded_files:
         error = "No files were submitted!"
-        print("❌ ERROR: No files submitted")
+        print("❌ ERROR: No files submitted", flush=True)
         return render(
             request,
             "taxonomy_ui/upload.html",
@@ -146,9 +146,9 @@ def upload_and_process(request):
 
     try:
         # Run Stage 2
-        print("🔄 Running Stage 2 processing...")
+        print("🔄 Running Stage 2 processing...", flush=True)
         output_bytes, filename = run_stage2_from_django(uploaded_files)
-        print(f"✅ Stage 2 completed: {filename} ({len(output_bytes)} bytes)")
+        print(f"✅ Stage 2 completed: {filename} ({len(output_bytes)} bytes)", flush=True)
 
         # Save file
         output_dir = os.path.join(settings.MEDIA_ROOT, "output")
@@ -157,16 +157,16 @@ def upload_and_process(request):
 
         with open(output_path, "wb") as f:
             f.write(output_bytes)
-        print(f"💾 Saved output file: {output_path}")
+        print(f"💾 Saved output file: {output_path}", flush=True)
 
         download_link = f"/download-full/{filename}/"
         output_filename = filename
 
         # Load preview DataFrame
-        print("📊 Loading Excel data...")
+        print("📊 Loading Excel data...", flush=True)
         df = pd.read_excel(io.BytesIO(output_bytes))
-        print(f"✅ Loaded DataFrame: {len(df)} rows, {len(df.columns)} columns")
-        print(f"   Columns: {list(df.columns)}")
+        print(f"✅ Loaded DataFrame: {len(df)} rows, {len(df.columns)} columns", flush=True)
+        print(f"   Columns: {list(df.columns)[:10]}...", flush=True)  # Show first 10 columns
 
         # ----------------------------------------------------------------------
         # FIX BLOCK: Prevent NaTType utcoffset crash in Django templates
@@ -182,7 +182,7 @@ def upload_and_process(request):
 
         # NEW: SAVE TO DATABASE
         # ----------------------------------------------------------------------
-        print("💾 Saving to database...")
+        print("💾 Saving to database...", flush=True)
         
         # Check if required columns exist
         required_cols = ['part_number']
@@ -190,7 +190,7 @@ def upload_and_process(request):
         
         if missing_cols:
             warning = f"Cannot save to database: Missing required columns: {missing_cols}"
-            print(f"⚠️  {warning}")
+            print(f"⚠️  {warning}", flush=True)
         else:
             for idx, row in df.iterrows():
                 try:
@@ -220,20 +220,20 @@ def upload_and_process(request):
                     saved_count += 1
                     
                     if saved_count % 10 == 0:
-                        print(f"   Saved {saved_count} records...")
+                        print(f"   Saved {saved_count} records...", flush=True)
                         
                 except Exception as row_error:
-                    print(f"❌ Error saving row {idx}: {row_error}")
+                    print(f"❌ Error saving row {idx}: {row_error}", flush=True)
                     continue
             
-            print(f"✅ Successfully saved {saved_count} records to database")
+            print(f"✅ Successfully saved {saved_count} records to database", flush=True)
         # ----------------------------------------------------------------------
 
         if "sources" in df.columns:
             df["sources"] = df["sources"].astype(str).str.replace(",", ",\n")
 
         has_df = not df.empty
-        print(f"✅ Upload process completed successfully")
+        print(f"✅ Upload process completed successfully", flush=True)
 
     except Exception as e:
         error = str(e)
@@ -241,13 +241,13 @@ def upload_and_process(request):
         has_df = False
         import traceback
         error_trace = traceback.format_exc()
-        print(f"❌ ERROR in upload_and_process:")
-        print(error_trace)
+        print(f"❌ ERROR in upload_and_process:", flush=True)
+        print(error_trace, flush=True)
         logger.error(f"Upload error: {error_trace}")
 
-    print("=" * 80)
-    print(f"📊 FINAL STATUS: saved_count={saved_count}, has_df={has_df}, error={error}")
-    print("=" * 80)
+    print("=" * 80, flush=True)
+    print(f"📊 FINAL STATUS: saved_count={saved_count}, has_df={has_df}, error={error}", flush=True)
+    print("=" * 80, flush=True)
 
     # Final render
     return render(
