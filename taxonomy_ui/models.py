@@ -22,7 +22,7 @@ class PartMaster(models.Model):
     source_file = models.CharField(max_length=255, blank=True, null=True)
 
     class Meta:
-        managed = False  # Django will NOT create/alter this table
+        managed = True  # Django will NOT create/alter this table
         db_table = "part_master"
         ordering = ["part_number"]
 
