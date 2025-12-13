@@ -12,3 +12,4 @@ python manage.py migrate --fake-initial
 python manage.py migrate
 
 python manage.py collectstatic --noinput
+python background_stage1.py
