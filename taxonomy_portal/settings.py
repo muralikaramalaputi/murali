@@ -26,6 +26,9 @@ SECRET_KEY = 'django-insecure-ep8e*1^g*v$@igfhv+-!)+s2)4)3i8#(*i-hlj0fcjvvma$^hm
 DEBUG = True
 
 ALLOWED_HOSTS = ["*"]
+CSRF_TRUSTED_ORIGINS = [
+    "https://*.onrender.com",
+]
 
 
 # Application definition
@@ -75,17 +78,18 @@ WSGI_APPLICATION = 'taxonomy_portal.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+import os
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
-        "NAME": "taxonomy_poc",
-        "USER": "postgres",
-        "PASSWORD": "postgres",  # <-- your password
-        "HOST": "localhost",
-        "PORT": "5433",
+        "NAME": os.environ.get("DB_NAME"),
+        "USER": os.environ.get("DB_USER"),
+        "PASSWORD": os.environ.get("DB_PASSWORD"),
+        "HOST": os.environ.get("DB_HOST"),
+        "PORT": os.environ.get("DB_PORT", "5432"),
     }
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
