@@ -1,16 +1,11 @@
-#from django.db import models
-
-# Create your models here.
-# taxonomy_ui/models.py
-
 from django.db import models
 
-
 class PartMaster(models.Model):
-    id = models.AutoField(primary_key=True)
     part_number = models.CharField(max_length=100, unique=True)
 
-    updated_at = models.DateTimeField(auto_now=True)
+    updated_at = models.DateTimeField(
+        auto_now_add=True   # 👈 IMPORTANT
+    )
 
     dimensions = models.CharField(max_length=255, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
@@ -24,9 +19,4 @@ class PartMaster(models.Model):
     source_file = models.CharField(max_length=255, blank=True, null=True)
 
     class Meta:
-      
         db_table = "part_master"
-        ordering = ["part_number"]
-
-    def __str__(self):
-        return f"{self.part_number} - {self.description or ''}"

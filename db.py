@@ -4,130 +4,67 @@ import os
 import math
 from typing import Dict, Any, Iterable, List, Sequence
 from urllib.parse import urlparse
+from datetime import datetime
 
 import psycopg2
 from psycopg2.extras import execute_values
 
 
+# ==================================================
+# DATABASE CONNECTION
+# ==================================================
 def get_connection():
-    """
-    Get database connection from DATABASE_URL environment variable (Render).
-    Falls back to config.DB_CONFIG for local development.
-    """
-    database_url = os.environ.get('DATABASE_URL')
-    
+    database_url = os.environ.get("DATABASE_URL")
+
     if database_url:
-        # Parse DATABASE_URL for Render/production
         parsed = urlparse(database_url)
         return psycopg2.connect(
             host=parsed.hostname,
             port=parsed.port or 5432,
-            database=parsed.path[1:],  # Remove leading '/'
+            database=parsed.path[1:],
             user=parsed.username,
             password=parsed.password,
-            sslmode='require'  # Render requires SSL
+            sslmode="require",
         )
     else:
-        # Fall back to local config for development
-        try:
-            from config import DB_CONFIG
-            return psycopg2.connect(**DB_CONFIG)
-        except ImportError:
-            raise Exception("DATABASE_URL not set and config.DB_CONFIG not available")
+        from config import DB_CONFIG
+        return psycopg2.connect(**DB_CONFIG)
 
 
+# ==================================================
+# INIT DB
+# ==================================================
 def init_db():
-    """
-    Create single flat table part_master if not exists.
-    Only id, part_number, updated_at here.
-    Other columns will be added dynamically.
-    """
     conn = get_connection()
     cur = conn.cursor()
-    
-    # Check if table exists
+
     cur.execute("""
-        SELECT EXISTS (
-            SELECT FROM information_schema.tables 
-            WHERE table_schema = 'public' 
-            AND table_name = 'part_master'
+        CREATE TABLE IF NOT EXISTS part_master (
+            id SERIAL PRIMARY KEY,
+            part_number TEXT UNIQUE NOT NULL,
+            updated_at TIMESTAMP NOT NULL DEFAULT NOW()
         );
     """)
-    table_exists = cur.fetchone()[0]
-    
-    if not table_exists:
-        # Create table with UNIQUE constraint
-        cur.execute(
-            """
-            CREATE TABLE part_master (
-                id SERIAL PRIMARY KEY,
-                part_number TEXT UNIQUE NOT NULL,
-                updated_at TIMESTAMP DEFAULT NOW()
-            );
-            """
-        )
-        print("✅ Created part_master table with UNIQUE constraint", flush=True)
-    else:
-        # Table exists - check if UNIQUE constraint exists
-        cur.execute("""
-            SELECT constraint_name 
-            FROM information_schema.table_constraints 
-            WHERE table_name = 'part_master' 
-            AND constraint_type = 'UNIQUE' 
-            AND constraint_name LIKE '%part_number%';
-        """)
-        unique_exists = cur.fetchone()
-        
-        if not unique_exists:
-            # Add UNIQUE constraint to existing table
-            print("⚠️  Adding UNIQUE constraint to existing part_number column...", flush=True)
-            try:
-                # First, remove any duplicate part_numbers
-                cur.execute("""
-                    DELETE FROM part_master
-                    WHERE id NOT IN (
-                        SELECT MIN(id)
-                        FROM part_master
-                        GROUP BY part_number
-                    );
-                """)
-                duplicates_removed = cur.rowcount
-                if duplicates_removed > 0:
-                    print(f"   Removed {duplicates_removed} duplicate part_numbers", flush=True)
-                
-                # Now add the UNIQUE constraint
-                cur.execute("""
-                    ALTER TABLE part_master 
-                    ADD CONSTRAINT part_master_part_number_key 
-                    UNIQUE (part_number);
-                """)
-                print("✅ Added UNIQUE constraint to part_number", flush=True)
-            except Exception as e:
-                print(f"⚠️  Could not add UNIQUE constraint: {e}", flush=True)
-                # If constraint already exists, that's fine
-                pass
-    
+
     conn.commit()
     cur.close()
     conn.close()
 
 
+# ==================================================
+# COLUMN HELPERS
+# ==================================================
 def _get_existing_columns(cur) -> List[str]:
-    cur.execute(
-        """
+    cur.execute("""
         SELECT column_name
         FROM information_schema.columns
-        WHERE table_name = 'part_master'
-          AND table_schema = 'public';
-        """
-    )
+        WHERE table_schema = 'public'
+          AND table_name = 'part_master';
+    """)
     return [r[0] for r in cur.fetchall()]
 
 
 def ensure_columns(columns: Iterable[str]) -> None:
-    """
-    Add missing columns (TEXT) to part_master.
-    """
     cols = set(columns) - {"id", "part_number", "updated_at"}
     if not cols:
         return
@@ -136,20 +73,19 @@ def ensure_columns(columns: Iterable[str]) -> None:
     cur = conn.cursor()
 
     existing = set(_get_existing_columns(cur))
-    new_cols = [c for c in cols if c not in existing]
-
-    for c in new_cols:
-        cur.execute(f'ALTER TABLE part_master ADD COLUMN "{c}" TEXT;')
+    for c in cols:
+        if c not in existing:
+            cur.execute(f'ALTER TABLE part_master ADD COLUMN "{c}" TEXT;')
 
     conn.commit()
     cur.close()
     conn.close()
 
 
+# ==================================================
+# SANITIZE
+# ==================================================
 def _sanitize_value(v: Any) -> Any:
-    """
-    Convert values to DB-safe (None or string).
-    """
     if v is None:
         return None
     if isinstance(v, float) and math.isnan(v):
@@ -160,16 +96,14 @@ def _sanitize_value(v: Any) -> Any:
     return s
 
 
+# ==================================================
+# 🔥 UPSERT PART MASTER (FULL FIX)
+# ==================================================
 def upsert_part_master(records: Sequence[Dict[str, Any]]) -> None:
-    """
-    Upsert records into part_master.
-    - Dynamic columns (TEXT) added as needed.
-    - ON CONFLICT(part_number) -> UPDATE all other columns + updated_at.
-    """
     if not records:
         return
 
-    # union of all keys
+    # Collect all keys
     all_keys = set()
     for r in records:
         all_keys.update(r.keys())
@@ -177,40 +111,57 @@ def upsert_part_master(records: Sequence[Dict[str, Any]]) -> None:
     if "part_number" not in all_keys:
         return
 
-    # ensure columns in DB
+    # Ensure DB has all columns
     ensure_columns(all_keys)
 
     conn = get_connection()
     cur = conn.cursor()
 
     existing_cols = set(_get_existing_columns(cur))
-    # Only use columns that actually exist in DB
-    used_cols = [c for c in all_keys if c in existing_cols and c != "id" and c != "updated_at"]
 
-    # make sure part_number is first
-    used_cols = ["part_number"] + [c for c in used_cols if c != "part_number"]
+    # Columns used for insert/update
+    data_cols = [
+        c for c in all_keys
+        if c in existing_cols and c not in {"id", "updated_at"}
+    ]
 
-    cols_sql = ", ".join(f'"{c}"' for c in used_cols)
+    # Ensure order
+    data_cols = ["part_number"] + [c for c in data_cols if c != "part_number"]
 
-    update_assignments = ", ".join(
-        f'"{c}" = EXCLUDED."{c}"' for c in used_cols if c != "part_number"
+    insert_cols = ["part_number", "updated_at"] + [
+        c for c in data_cols if c != "part_number"
+    ]
+
+    insert_sql_cols = ", ".join(f'"{c}"' for c in insert_cols)
+
+    update_sql = ", ".join(
+        f'"{c}" = EXCLUDED."{c}"'
+        for c in insert_cols
+        if c != "part_number"
     )
 
     sql = f"""
-        INSERT INTO part_master ({cols_sql})
+        INSERT INTO part_master ({insert_sql_cols})
         VALUES %s
-        ON CONFLICT (part_number) DO UPDATE SET
-            {update_assignments},
-            updated_at = NOW();
+        ON CONFLICT (part_number)
+        DO UPDATE SET {update_sql};
     """
 
+    now = datetime.utcnow()
     values = []
+
     for r in records:
         pn = r.get("part_number")
         if not pn:
             continue
-        row_vals = [_sanitize_value(r.get(c)) for c in used_cols]
-        values.append(row_vals)
+
+        row = [pn, now]
+        for c in data_cols:
+            if c == "part_number":
+                continue
+            row.append(_sanitize_value(r.get(c)))
+
+        values.append(tuple(row))
 
     if not values:
         cur.close()
@@ -223,10 +174,18 @@ def upsert_part_master(records: Sequence[Dict[str, Any]]) -> None:
     conn.close()
 
 
+# ==================================================
+# FETCH
+# ==================================================
 def fetch_part_by_number(part_number: str) -> Dict[str, Any] | None:
     conn = get_connection()
     cur = conn.cursor()
-    cur.execute('SELECT * FROM part_master WHERE part_number = %s;', (part_number,))
+
+    cur.execute(
+        "SELECT * FROM part_master WHERE part_number = %s;",
+        (part_number,)
+    )
+
     row = cur.fetchone()
     if not row:
         cur.close()
