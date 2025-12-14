@@ -20,8 +20,8 @@ def run_stage2_from_django(uploaded_files):
     dfs = []
 
     for f in uploaded_files:
-        # Read file directly from Django's uploaded file (NO PATH NEEDED)
-        df = load_file(f)     # <-- load_file must support file-like object
+        # Read file directly from Django uploaded file
+        df = load_file(f)
         if df is None or df.empty:
             continue
 
@@ -32,9 +32,10 @@ def run_stage2_from_django(uploaded_files):
     if not dfs:
         raise ValueError("No valid data found in uploaded files.")
 
-    # Merge all DataFrames like Stage-2 logic
+    # Combine all user data
     df_raw = pd.concat(dfs, ignore_index=True)
 
+    # Cleanup + enrichment
     df_clean = cleanup_pipeline(df_raw)
     df_clean = enrich_from_description(df_clean)
 
@@ -43,26 +44,30 @@ def run_stage2_from_django(uploaded_files):
 
     records = df_clean.to_dict(orient="records")
 
-    merged_results = []
+    # Merge with DB records
     from collections import defaultdict
     groups = defaultdict(list)
-
     for r in records:
         pn = r.get("part_number")
         if pn:
             groups[pn].append(r)
 
+    merged_results = []
     for pn, user_rows in groups.items():
         db_row = fetch_part_by_number(pn)
         merged = merge_db_with_user(db_row, user_rows)
         merged_results.append(merged)
 
-    # Upsert into database
+    # Upsert merged results into DB
     upsert_part_master(merged_results)
 
-    # Create Excel output
+    # Prepare Excel output
     output_buffer = io.BytesIO()
     df_out = pd.DataFrame(merged_results)
+
+    # 🔥 FIX: Remove timezone info (Excel cannot handle tz-aware datetimes)
+    for col in df_out.select_dtypes(include=["datetimetz"]):
+        df_out[col] = df_out[col].dt.tz_localize(None)
 
     with pd.ExcelWriter(output_buffer, engine="xlsxwriter") as writer:
         df_out.to_excel(writer, index=False, sheet_name="Parts")
