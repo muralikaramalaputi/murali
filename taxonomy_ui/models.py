@@ -10,7 +10,8 @@ class PartMaster(models.Model):
     id = models.AutoField(primary_key=True)
     part_number = models.CharField(max_length=100, unique=True)
 
-    updated_at = models.DateTimeField()
+    updated_at = models.DateTimeField(auto_now=True)
+
     dimensions = models.CharField(max_length=255, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
     cost = models.CharField(max_length=100, blank=True, null=True)
