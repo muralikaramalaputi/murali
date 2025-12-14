@@ -8,7 +8,8 @@ from django.db import models
 
 class PartMaster(models.Model):
     id = models.AutoField(primary_key=True)
-    part_number = models.CharField(max_length=100)
+    part_number = models.CharField(max_length=100, unique=True)
+
     updated_at = models.DateTimeField()
     dimensions = models.CharField(max_length=255, blank=True, null=True)
     description = models.TextField(blank=True, null=True)
