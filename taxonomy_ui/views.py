@@ -54,7 +54,7 @@ def home(request):
 # Stage 1 DB parts view
 # ----------------------------------------------------------
 def part_list(request):
-    parts = PartMaster.objects.all().order_by("part_number").values()
+    parts = PartMaster.objects.all().order_by("id").values()
     df = pd.DataFrame(parts)
 
     if df.empty:
