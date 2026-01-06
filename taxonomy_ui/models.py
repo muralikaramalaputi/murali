@@ -74,4 +74,4 @@ class PartMaster(models.Model):
 
     class Meta:
         db_table = "material_master"   # ✅ IMPORTANT
-        managed = False
+        
