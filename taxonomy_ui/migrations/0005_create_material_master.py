@@ -3,7 +3,7 @@ from django.db import migrations
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('taxonomy_ui', '0004_alter_partmaster_options_alter_partmaster_id_alter_partmaster_updated_at'),
+        ('taxonomy_ui', '0004_alter_partmaster_options_alter_partmaster_id_and_more'),
     ]
 
     operations = [
